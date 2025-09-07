@@ -27,7 +27,7 @@
 <body>
   <div class="wrap">
     <h1>服务状态</h1>
-    <p>仅展示端点可用性与数据库连通性（由后端资源层健康检查提供）。</p>
+    <p>仅展示端点可用性。</p>
 
     <div>
       <button id="checkBtn" class="btn">检查状态</button>
@@ -48,17 +48,13 @@
       elBtn.disabled = true;
       elBtn.textContent = '检查中...';
       try {
-        const res = await fetch('/api/webhook', { headers: { 'Accept': 'application/json' } });
+        const res = await fetch('/api/conn', { headers: { 'Accept': 'application/json' } });
         const data = await res.json();
         const endpointOk = res.ok && data && data.status === 'ok';
-        const dbOk = !!(data && data.db_ok);
-        const sha = data && data.commit && data.commit.sha ? data.commit.sha : '';
 
         elStatus.style.display = 'block';
         elStatus.innerHTML = `
           <div class="row"><span class="k">端点</span><span class="v">${String(endpointOk)} ${badge(endpointOk)}</span></div>
-          <div class="row"><span class="k">数据库</span><span class="v">${String(dbOk)} ${badge(dbOk)}</span></div>
-          ${sha ? `<div class="row"><span class="k">版本</span><span class="v">${sha}</span></div>` : ''}
         `;
       } catch (e) {
         elStatus.style.display = 'block';

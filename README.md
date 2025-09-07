@@ -15,7 +15,7 @@
 │   ├── webhook.py          # 业务层：处理 Telegram 更新（最小输出）
 │   ├── conn.py             # 资源层：数据库连接与查询工具
 │   └── requirements.txt    # 线上依赖（requests、psycopg[binary]）
-├── index.html              # 入口页：仅检测端点与数据库状态
+├── index.html              # 入口页：仅检测端点健康
 ├── vercel.json             # Vercel 函数运行时与路由配置
 ├── .env.example
 ├── .gitignore
@@ -52,7 +52,7 @@
    - SUPABASE_SEARCH_COLUMN（可选，默认 account）
 3) 构建与依赖
    - Vercel 自动安装 api/requirements.txt（requests、psycopg[binary]）
-   - 部署完成后访问根路径查看 index.html 状态页；或 GET /api/webhook
+   - 部署完成后访问根路径查看 index.html 状态页；或 GET /api/conn
 4) 绑定 Telegram Webhook
    - 设置 Webhook: https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://your-vercel-domain/api/webhook
    - 查看 Webhook 状态: https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo
