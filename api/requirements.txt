@@ -1,4 +1,0 @@
-# Minimal deps required by the serverless function
-requests==2.31.0
-# install psycopg with binary wheel and pool extra for psycopg_pool
-psycopg[binary,pool]==3.1.18
