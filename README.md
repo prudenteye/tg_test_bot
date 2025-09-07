@@ -15,7 +15,7 @@
 │   ├── webhook.py          # 业务层：处理 Telegram 更新（最小输出）
 │   ├── conn.py             # 资源层：数据库连接与查询工具
 │   └── requirements.txt    # 线上依赖（requests、psycopg[binary]）
-├── index.html              # 入口页：仅检测端点健康
+├── index.html              # 入口页：显示 Webhook 可用性与数据连接状态
 ├── vercel.json             # Vercel 函数运行时与路由配置
 ├── .env.example
 ├── .gitignore
@@ -59,9 +59,11 @@
 
 ## 本地/联调（建议）
 
-- 使用虚拟环境安装 requirements-dev.txt（含 Flask 等）
-- 在 scripts/app.py 中用 Flask 模拟 /api/webhook（不入库，不提交）
-- 通过 .env 或环境变量提供 TELEGRAM_BOT_TOKEN、DATABASE_URL 等
+- 使用虚拟环境
+  python -m venv .venv && source .venv/bin/activate
+  pip install "psycopg[binary,pool]" flask python-dotenv requests
+- 在 scripts/app.py 中用 Flask 模拟 /api/webhook 与 /api/conn（scripts/ 已忽略，不入库）
+- 通过 .env 或环境变量提供 TELEGRAM_BOT_TOKEN、DATABASE_URL、SUPABASE_TABLE_NAME、SUPABASE_SEARCH_COLUMN 等
 
 ## 常见问题
 
