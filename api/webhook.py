@@ -1,3 +1,87 @@
-# Vercel Python Serverless entry. Reuse existing handler implementation.
-# File-based routing: this function will be available at /api/webhook
-from python.api.webhook import handler as handler  # type: ignore
+# Vercel Python Serverless function - standalone handler
+# This file is the only entry point needed for deployment.
+import json
+import os
+import requests
+from typing import Dict, Any, Union
+
+# Support both env variable names
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
+
+def handler(request) -> Dict[str, Any]:
+    # Method guard
+    if hasattr(request, "method") and request.method != "POST":
+        return {"statusCode": 405, "body": json.dumps({"error": "Method not allowed"})}
+
+    if not BOT_TOKEN:
+        return {"statusCode": 500, "body": json.dumps({"error": "BOT_TOKEN not configured"})}
+
+    try:
+        # Extract JSON body (compatible with Flask-like or Vercel request)
+        data = None
+        if hasattr(request, "get_json") and callable(getattr(request, "get_json")):
+            data = request.get_json()
+        elif hasattr(request, "json") and request.json:
+            data = request.json
+        elif hasattr(request, "body"):
+            body = request.body
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            data = json.loads(body) if body else {}
+        else:
+            raw = getattr(request, "data", {})
+            if isinstance(raw, str):
+                data = json.loads(raw)
+            else:
+                data = raw
+
+        if not data:
+            return {"statusCode": 400, "body": json.dumps({"error": "No data received"})}
+
+        # Ignore non-message updates
+        if "message" not in data:
+            return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
+
+        message = data["message"]
+        chat = message.get("chat") or {}
+        chat_id = chat.get("id")
+
+        # Only process text
+        text = message.get("text")
+        if text is None:
+            send_message(chat_id, "请发送文本消息！")
+            return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
+
+        # 32-byte limit (UTF-8)
+        if len(text.encode("utf-8")) > 32:
+            send_message(chat_id, "消息太长了！请发送不超过32字节的字符串。")
+            return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
+
+        # Reverse and reply
+        reversed_text = text[::-1]
+        send_message(chat_id, f"逆序结果：{reversed_text}")
+
+        return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
+
+    except Exception as e:
+        print(f"Error processing webhook: {e}")
+        return {"statusCode": 500, "body": json.dumps({"error": "Internal server error"})}
+
+def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
+    if not TELEGRAM_API_URL or not chat_id:
+        return {"ok": False, "error": "Bot token or chat_id missing"}
+
+    url = f"{TELEGRAM_API_URL}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending message: {e}")
+        return {"ok": False, "error": str(e)}
+
+# Vercel entry point
+def handler_vercel(request):
+    return handler(request)
