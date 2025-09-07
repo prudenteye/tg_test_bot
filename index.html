@@ -61,7 +61,7 @@
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ "update_id": 1, "message": {} })
           });
-          webhookOk = wres.ok;
+          webhookOk = (wres.status && Number(wres.status) < 500);
         } catch (e) {
           webhookOk = false;
         }
