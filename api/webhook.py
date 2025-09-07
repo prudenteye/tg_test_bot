@@ -133,7 +133,8 @@ def _get_pool():
         return None
     dsn = _ensure_db_url_ssl(DATABASE_URL)
     try:
-        _PG_POOL = ConnectionPool(dsn, min_size=0, max_size=5, kwargs={"connect_timeout": 5})
+        # reduce connect timeout to speed up Preview even if DB unavailable
+        _PG_POOL = ConnectionPool(dsn, min_size=0, max_size=5, kwargs={"connect_timeout": 2})
         return _PG_POOL
     except Exception as e:
         print(f"Error creating DB pool: {e}")
@@ -276,18 +277,17 @@ class handler(BaseHTTPRequestHandler):
         db_cfg = bool(DATABASE_URL)
         csv_cfg = bool(CSV_FILE_PATH)
 
-        # DB connectivity check
+        # DB connectivity check (fast-fail)
         db_ok = False
         db_error = ""
         try:
-            if db_cfg and HAS_PG and _get_pool():
-                pool = _get_pool()
-                if pool:
-                    with pool.connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT 1")
-                            cur.fetchone()
-                            db_ok = True
+            pool = _get_pool()
+            if db_cfg and HAS_PG and pool:
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                        cur.fetchone()
+                        db_ok = True
         except Exception as e:
             db_ok = False
             db_error = str(e)
