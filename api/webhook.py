@@ -4,13 +4,13 @@ import json
 import os
 import requests
 from http.server import BaseHTTPRequestHandler
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, Optional
 
-# Support both env variable names
+# Telegram
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 
-# Main feature config placeholders
+# CSV fallback config
 CSV_FILE_PATH = os.environ.get("CSV_FILE_PATH") or "/var/task/db/wxid_test.csv"
 CSV_KEY_COLUMN = os.environ.get("CSV_KEY_COLUMN", "account")
 
@@ -20,13 +20,7 @@ FEATURE_USE_SUPABASE = (os.environ.get("FEATURE_USE_SUPABASE", "false").lower() 
 SUPABASE_TABLE = os.environ.get("SUPABASE_TABLE_NAME", "accounts")
 SUPABASE_SEARCH_COLUMN = os.environ.get("SUPABASE_SEARCH_COLUMN", CSV_KEY_COLUMN)
 
-# Supabase/Postgres (via psycopg3) config
-DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL")
-FEATURE_USE_SUPABASE = (os.environ.get("FEATURE_USE_SUPABASE", "false").lower() == "true")
-SUPABASE_TABLE = os.environ.get("SUPABASE_TABLE_NAME", "accounts")
-SUPABASE_SEARCH_COLUMN = os.environ.get("SUPABASE_SEARCH_COLUMN", CSV_KEY_COLUMN)
-
-# Optional pandas import (for deployment, ensure pandas is installed)
+# Optional pandas import (for CSV fallback)
 try:
     import pandas as pd  # type: ignore
     HAS_PANDAS = True
@@ -46,29 +40,13 @@ except Exception:
     dict_row = None
     HAS_PG = False
 
-# Global DB pool (may persist across invocations)
-_PG_POOL = None  # type: ignore
-
-# Optional Postgres driver (psycopg3) for Supabase
-try:
-    import psycopg  # type: ignore
-    from psycopg_pool import ConnectionPool  # type: ignore
-    from psycopg.rows import dict_row  # type: ignore
-    HAS_PG = True
-except Exception:
-    psycopg = None
-    ConnectionPool = None
-    dict_row = None
-    HAS_PG = False
-
-# Global DB pool (may persist across invocations in serverless warm starts)
-_PG_POOL = None  # type: ignore
-
-# Simple in-memory cache; for serverless, may reload per invocation
+# Global caches (may persist across warm invocations)
 _DF_CACHE = None  # type: ignore
+_PG_POOL = None  # type: ignore
+
 
 def _handle(request) -> Dict[str, Any]:
-    # Method guard
+    # Only POST for webhook processing
     if hasattr(request, "method") and request.method != "POST":
         return {"statusCode": 405, "body": json.dumps({"error": "Method not allowed"})}
 
@@ -76,7 +54,7 @@ def _handle(request) -> Dict[str, Any]:
         return {"statusCode": 500, "body": json.dumps({"error": "BOT_TOKEN not configured"})}
 
     try:
-        # Extract JSON body (compatible with Flask-like or Vercel request)
+        # Extract JSON body (compatible with Vercel/flask-like)
         data = None
         if hasattr(request, "get_json") and callable(getattr(request, "get_json")):
             data = request.get_json()
@@ -116,7 +94,7 @@ def _handle(request) -> Dict[str, Any]:
             send_message(chat_id, "消息太长了！请发送不超过50字节的字符串。")
             return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
 
-        # CSV query
+        # Query (Supabase first, then CSV fallback)
         result_msg = process_query(text)
         send_message(chat_id, result_msg)
 
@@ -126,21 +104,8 @@ def _handle(request) -> Dict[str, Any]:
         print(f"Error processing webhook: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": "Internal server error"})}
 
-def _load_dataframe():
-    global _DF_CACHE
-    if _DF_CACHE is not None:
-        return _DF_CACHE
-    if not HAS_PANDAS:
-        return None
-    if not CSV_FILE_PATH:
-        return None
-    try:
-        df = pd.read_csv(CSV_FILE_PATH, encoding="utf-8-sig")
-        _DF_CACHE = df
-        return df
-    except Exception as e:
-        print(f"Error loading CSV: {e}")
-        return None
+
+# ---------------- Helpers: DB (Supabase/Postgres) ----------------
 
 def _is_safe_ident(name: str) -> bool:
     # allow letters, numbers, underscore only
@@ -151,51 +116,6 @@ def _is_safe_ident(name: str) -> bool:
             return False
     return True
 
-def _ensure_db_url_ssl(url: str) -> str:
-    if not url:
-        return url
-    if "sslmode=" in url:
-        return url
-    return (url + ("&sslmode=require" if "?" in url else "?sslmode=require"))
-
-def _get_pool():
-    global _PG_POOL
-    if _PG_POOL is not None:
-        return _PG_POOL
-    if not HAS_PG or not DATABASE_URL:
-        return None
-    dsn = _ensure_db_url_ssl(DATABASE_URL)
-    try:
-        # Small pool is enough for serverless
-        _PG_POOL = ConnectionPool(dsn, min_size=0, max_size=5, kwargs={"connect_timeout": 5})
-        return _PG_POOL
-    except Exception as e:
-        print(f"Error creating DB pool: {e}")
-        return None
-
-def _query_db(q: str):
-    pool = _get_pool()
-    if not pool:
-        return None
-    table = SUPABASE_TABLE if _is_safe_ident(SUPABASE_TABLE) else "accounts"
-    col = SUPABASE_SEARCH_COLUMN if _is_safe_ident(SUPABASE_SEARCH_COLUMN) else "account"
-    sql = f'SELECT remarks, account_byte_length, account, account_hash FROM "{table}" WHERE "{col}" ILIKE %s LIMIT 1'
-    try:
-        with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(sql, (f"%{q}%",))
-            row = cur.fetchone()
-            return row  # dict or None
-    except Exception as e:
-        print(f"DB query error: {e}")
-        return None
-
-def _is_safe_ident(name: str) -> bool:
-    if not isinstance(name, str) or not name:
-        return False
-    for ch in name:
-        if not (ch.isalnum() or ch == "_"):
-            return False
-    return True
 
 def _ensure_db_url_ssl(url: str) -> str:
     if not url:
@@ -204,6 +124,7 @@ def _ensure_db_url_ssl(url: str) -> str:
         return url
     return url + ("&sslmode=require" if "?" in url else "?sslmode=require")
 
+
 def _get_pool():
     global _PG_POOL
     if _PG_POOL is not None:
@@ -218,7 +139,8 @@ def _get_pool():
         print(f"Error creating DB pool: {e}")
         return None
 
-def _query_db(q: str):
+
+def _query_db(q: str) -> Optional[Dict[str, Any]]:
     pool = _get_pool()
     if not pool:
         return None
@@ -234,59 +156,49 @@ def _query_db(q: str):
         print(f"DB query error: {e}")
         return None
 
-def process_query(query_text: str) -> str:
-    # Basic placeholder: guide for deployment configuration and usage
-    if not HAS_PANDAS:
-        return "功能占位：未检测到 pandas。请在部署环境安装 pandas，并配置 CSV_FILE_PATH/CSV_KEY_COLUMN。"
-    if not CSV_FILE_PATH:
-        return "功能占位：未配置 CSV_FILE_PATH 环境变量。请设置 CSV 文件路径后重试。"
+
+# ---------------- CSV fallback (consolidated for easy removal) ----------------
+
+def _load_dataframe():
+    global _DF_CACHE
+    if _DF_CACHE is not None:
+        return _DF_CACHE
+    if not HAS_PANDAS or not CSV_FILE_PATH:
+        return None
+    try:
+        df = pd.read_csv(CSV_FILE_PATH, encoding="utf-8-sig")
+        _DF_CACHE = df
+        return df
+    except Exception as e:
+        print(f"Error loading CSV: {e}")
+        return None
+
+
+def _query_csv(q: str) -> Optional[str]:
+    if not HAS_PANDAS or not CSV_FILE_PATH:
+        return None
     df = _load_dataframe()
     if df is None:
-        return "功能占位：无法加载 CSV 文件，请检查路径和文件格式。"
+        return None
     key_col = CSV_KEY_COLUMN if CSV_KEY_COLUMN in df.columns else None
     if key_col is None:
-        return f"功能占位：CSV 中不存在配置的键列 '{CSV_KEY_COLUMN}'，当前列为：{list(df.columns)}"
+        return None
     try:
-        # 模糊匹配（包含），对空白输入与非字符串数据做兼容
-        q = (str(query_text) if query_text is not None else "").strip()
-        if not q:
-            return "请输入非空的查询关键字。"
-
-        # Prefer Supabase DB if enabled and driver available
-        if FEATURE_USE_SUPABASE and HAS_PG and DATABASE_URL:
-            row_db = _query_db(q)
-            if isinstance(row_db, dict) and row_db:
-                if "remarks" in row_db and row_db.get("remarks") not in (None, ""):
-                    return str(row_db["remarks"])
-                if "account_byte_length" in row_db and row_db.get("account_byte_length") is not None:
-                    return str(row_db["account_byte_length"])
-                # Fallback preview (limit items)
-                items = []
-                max_items = 20
-                for i, (k, v) in enumerate(row_db.items()):
-                    if i >= max_items:
-                        items.append("...后续字段已截断")
-                        break
-                    items.append(f"{k}: {v}")
-                return "查询结果：\
-" + "\
-".join(items)
-            # if no db result, fall back to CSV
-
-        # CSV fallback
         series = df[key_col].astype(str)
         matched = df[series.str.contains(q, regex=False, na=False)]
         if matched.empty:
-            return f"未找到记录：{query_text}"
+            return None
         # 优先返回 remarks 或 account_byte_length
         if "remarks" in matched.columns:
             val = matched.iloc[0]["remarks"]
-            return str(val) if val is not None else "未找到 remarks 内容"
+            if val is not None and str(val) != "":
+                return str(val)
         if "account_byte_length" in matched.columns:
-            return str(matched.iloc[0]["account_byte_length"])
+            val2 = matched.iloc[0]["account_byte_length"]
+            if val2 is not None:
+                return str(val2)
         # 简要返回第一条记录的所有字段
         row = matched.iloc[0].to_dict()
-        # 控制返回长度，避免过长消息
         preview_items = []
         max_len = 600
         curr = 0
@@ -299,8 +211,47 @@ def process_query(query_text: str) -> str:
             curr += len(item) + 1
         return "查询结果：\n" + "\n".join(preview_items)
     except Exception as e:
+        print(f"CSV query error: {e}")
+        return None
+
+
+# ---------------- Query orchestrator ----------------
+
+def process_query(query_text: str) -> str:
+    try:
+        q = (str(query_text) if query_text is not None else "").strip()
+        if not q:
+            return "请输入非空的查询关键字。"
+
+        # 1) Supabase (DB) first
+        if FEATURE_USE_SUPABASE and HAS_PG and DATABASE_URL:
+            row_db = _query_db(q)
+            if isinstance(row_db, dict) and row_db:
+                if "remarks" in row_db and row_db.get("remarks") not in (None, ""):
+                    return f"{row_db['remarks']} [supabase]"
+                if "account_byte_length" in row_db and row_db.get("account_byte_length") is not None:
+                    return f"{row_db['account_byte_length']} [supabase]"
+                # Fallback preview
+                items = []
+                max_items = 20
+                for i, (k, v) in enumerate(row_db.items()):
+                    if i >= max_items:
+                        items.append("...后续字段已截断")
+                        break
+                    items.append(f"{k}: {v}")
+                return "查询结果：\n" + "\n".join(items) + " [supabase]"
+
+        # 2) CSV fallback
+        csv_msg = _query_csv(q)
+        if csv_msg:
+            return f"{csv_msg} [csv]"
+
+        # 3) Not found
+        return f"未找到记录：{query_text}"
+    except Exception as e:
         print(f"Error processing query: {e}")
-        return "查询失败：请检查 CSV 内容与配置。"
+        return "查询失败：请检查配置与数据源。"
+
 
 def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
     if not TELEGRAM_API_URL or not chat_id:
@@ -316,22 +267,108 @@ def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
         print(f"Error sending message: {e}")
         return {"ok": False, "error": str(e)}
 
-# Expose a class-based handler for Vercel runtime scanning
+
+# Expose a class-based handler for Vercel runtime scanning with status page
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Health check
-        body = json.dumps({
+        # Build status values
+        bot_cfg = bool(BOT_TOKEN)
+        db_cfg = bool(DATABASE_URL)
+        csv_cfg = bool(CSV_FILE_PATH)
+
+        # DB connectivity check
+        db_ok = False
+        db_error = ""
+        try:
+            if db_cfg and HAS_PG and _get_pool():
+                pool = _get_pool()
+                if pool:
+                    with pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT 1")
+                            cur.fetchone()
+                            db_ok = True
+        except Exception as e:
+            db_ok = False
+            db_error = str(e)
+
+        # CSV availability
+        csv_ok = False
+        try:
+            csv_ok = _load_dataframe() is not None if csv_cfg and HAS_PANDAS else False
+        except Exception:
+            csv_ok = False
+
+        # Telegram webhook info
+        webhook_ok = False
+        webhook_url = ""
+        webhook_err = ""
+        try:
+            if bot_cfg and TELEGRAM_API_URL:
+                info_url = f"{TELEGRAM_API_URL}/getWebhookInfo"
+                r = requests.get(info_url, timeout=8)
+                if r.ok:
+                    ji = r.json()
+                    webhook_ok = bool(ji.get("ok"))
+                    result = ji.get("result") or {}
+                    webhook_url = result.get("url") or ""
+                    last_err = result.get("last_error_message") or ""
+                    if last_err:
+                        webhook_err = last_err
+        except Exception as e:
+            webhook_ok = False
+            webhook_err = str(e)
+
+        status_json = {
             "status": "ok",
-            "bot_configured": bool(BOT_TOKEN),
-            "csv_configured": bool(CSV_FILE_PATH),
+            "bot_configured": bot_cfg,
+            "webhook_ok": webhook_ok,
+            "webhook_url": webhook_url,
+            "webhook_error": webhook_err,
+            "db_configured": db_cfg,
+            "db_driver_available": HAS_PG,
+            "db_ok": db_ok,
+            "db_error": db_error,
+            "csv_configured": csv_cfg,
             "pandas_available": HAS_PANDAS,
-            "db_configured": bool(DATABASE_URL),
-            "db_driver_available": HAS_PG
-        })
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body.encode("utf-8"))
+            "csv_ok": csv_ok
+        }
+
+        accept = (self.headers.get("Accept") or "").lower()
+        if "text/html" in accept or "*/*" in accept:
+            html = f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Service Status</title>
+<style>
+body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px}}
+.badge{{display:inline-block;padding:2px 8px;border-radius:10px;color:#fff;font-size:12px;margin-left:6px}}
+.ok{{background:#2e7d32}} .warn{{background:#ed6c02}} .err{{background:#c62828}}
+code,pre{{background:#f6f8fa;padding:8px;border-radius:6px}}
+</style>
+</head><body>
+<h1>服务状态</h1>
+<ul>
+  <li>Telegram Bot 配置：{str(bot_cfg)} <span class="badge {'ok' if bot_cfg else 'err'}">{'OK' if bot_cfg else 'MISSING'}</span></li>
+  <li>Webhook：{str(webhook_ok)} <span class="badge {'ok' if webhook_ok else 'warn'}">{'OK' if webhook_ok else 'CHECK'}</span>
+    {(' 当前 URL: ' + webhook_url) if webhook_url else ''}{('；错误：' + webhook_err) if webhook_err else ''}</li>
+  <li>Supabase(DB) 配置：{str(db_cfg)}，驱动：{str(HAS_PG)}，连接：{str(db_ok)}
+    <span class="badge {'ok' if db_ok else ('warn' if db_cfg else 'err')}">{'OK' if db_ok else ('CFG' if db_cfg else 'MISSING')}</span>
+    {(' 错误：' + db_error) if (db_cfg and not db_ok and db_error) else ''}</li>
+  <li>CSV 配置：{str(csv_cfg)}，pandas：{str(HAS_PANDAS)}，可读：{str(csv_ok)}
+    <span class="badge {'ok' if csv_ok else ('warn' if csv_cfg else 'err')}">{'OK' if csv_ok else ('CFG' if csv_cfg else 'MISSING')}</span></li>
+</ul>
+<h3>原始数据</h3>
+<pre>{json.dumps(status_json, ensure_ascii=False, indent=2)}</pre>
+</body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html.encode("utf-8"))
+        else:
+            body = json.dumps(status_json, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
 
     def do_POST(self):
         try:
@@ -355,6 +392,7 @@ class handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"error":"Internal server error"}')
+
 
 # Vercel entry point
 def handler_vercel(request):
