@@ -1,0 +1,5 @@
+# Root requirements for Vercel Python runtime
+# Vercel installs dependencies from this file at the project root.
+requests==2.31.0
+psycopg[binary,pool]==3.1.18
+python-dotenv==1.0.1
