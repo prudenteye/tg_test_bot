@@ -146,6 +146,6 @@ def handler_vercel(request):
     return body
 
 # Named entrypoint (avoid shadowing class `handler`)
-vercel_handler = handler_vercel
+vercel_
 # Export default handler for Vercel runtime compatibility
 handler = handler_vercel
