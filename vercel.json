@@ -11,7 +11,7 @@
     { "src": "/api/conn", "dest": "/api/conn.py" },
     { "src": "/", "dest": "/index.html" }
   ],
-  "ignoreCommand": "echo Ignoring dev folders && echo",
+
   "git": {
     "ignore": [
       "db/**",
