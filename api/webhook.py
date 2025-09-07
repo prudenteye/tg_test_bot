@@ -106,13 +106,11 @@ def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
 # Class-based handler for Vercel runtime
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Minimal status: endpoint alive + DB connectivity, plus short commit
-        status_json = conn.health_status()
-        body = json.dumps(status_json, ensure_ascii=False)
-        self.send_response(200)
+        # webhook no longer serves GET; health is provided by GET /api/conn
+        self.send_response(405)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(body.encode("utf-8"))
+        self.wfile.write(b'{"error":"method_not_allowed"}')
 
     def do_POST(self):
         try:
@@ -141,3 +139,5 @@ class handler(BaseHTTPRequestHandler):
 # Vercel entry point
 def handler_vercel(request):
     return _handle(request)
+# Export default handler for Vercel runtime compatibility
+handler = handler_vercel

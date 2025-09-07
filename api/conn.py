@@ -170,3 +170,18 @@ class handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"error":"internal_error"}')
+
+# Vercel entry point (function form)
+def handler(request):
+    try:
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(health_status(), ensure_ascii=False),
+        }
+    except Exception:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": '{"error":"internal_error"}',
+        }
