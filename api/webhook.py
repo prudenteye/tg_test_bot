@@ -1,5 +1,4 @@
-# Vercel Python Serverless function - standalone handler
-# This file is the only entry point needed for deployment.
+# Vercel Python Serverless function - standalone handler (Supabase/Postgres only)
 import json
 import os
 import requests
@@ -10,25 +9,12 @@ from typing import Dict, Any, Union, Optional
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 
-# CSV fallback config
-CSV_FILE_PATH = os.environ.get("CSV_FILE_PATH") or "/var/task/db/wxid_test.csv"
-CSV_KEY_COLUMN = os.environ.get("CSV_KEY_COLUMN", "account")
-
-# Supabase/Postgres config
+# Supabase/Postgres config (via direct Postgres connection)
 DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL")
-FEATURE_USE_SUPABASE = (os.environ.get("FEATURE_USE_SUPABASE", "false").lower() == "true")
 SUPABASE_TABLE = os.environ.get("SUPABASE_TABLE_NAME", "accounts")
-SUPABASE_SEARCH_COLUMN = os.environ.get("SUPABASE_SEARCH_COLUMN", CSV_KEY_COLUMN)
+SUPABASE_SEARCH_COLUMN = os.environ.get("SUPABASE_SEARCH_COLUMN", "account")
 
-# Optional pandas import (for CSV fallback)
-try:
-    import pandas as pd  # type: ignore
-    HAS_PANDAS = True
-except Exception:
-    pd = None
-    HAS_PANDAS = False
-
-# Optional Postgres driver (psycopg3) for Supabase
+# Optional Postgres driver (psycopg3)
 try:
     import psycopg  # type: ignore
     from psycopg_pool import ConnectionPool  # type: ignore
@@ -41,7 +27,6 @@ except Exception:
     HAS_PG = False
 
 # Global caches (may persist across warm invocations)
-_DF_CACHE = None  # type: ignore
 _PG_POOL = None  # type: ignore
 
 
@@ -94,7 +79,7 @@ def _handle(request) -> Dict[str, Any]:
             send_message(chat_id, "消息太长了！请发送不超过50字节的字符串。")
             return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
 
-        # Query (Supabase first, then CSV fallback)
+        # Query (Supabase/Postgres only)
         result_msg = process_query(text)
         send_message(chat_id, result_msg)
 
@@ -158,64 +143,6 @@ def _query_db(q: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-# ---------------- CSV fallback (consolidated for easy removal) ----------------
-
-def _load_dataframe():
-    global _DF_CACHE
-    if _DF_CACHE is not None:
-        return _DF_CACHE
-    if not HAS_PANDAS or not CSV_FILE_PATH:
-        return None
-    try:
-        df = pd.read_csv(CSV_FILE_PATH, encoding="utf-8-sig")
-        _DF_CACHE = df
-        return df
-    except Exception as e:
-        print(f"Error loading CSV: {e}")
-        return None
-
-
-def _query_csv(q: str) -> Optional[str]:
-    if not HAS_PANDAS or not CSV_FILE_PATH:
-        return None
-    df = _load_dataframe()
-    if df is None:
-        return None
-    key_col = CSV_KEY_COLUMN if CSV_KEY_COLUMN in df.columns else None
-    if key_col is None:
-        return None
-    try:
-        series = df[key_col].astype(str)
-        matched = df[series.str.contains(q, regex=False, na=False)]
-        if matched.empty:
-            return None
-        # 优先返回 remarks 或 account_byte_length
-        if "remarks" in matched.columns:
-            val = matched.iloc[0]["remarks"]
-            if val is not None and str(val) != "":
-                return str(val)
-        if "account_byte_length" in matched.columns:
-            val2 = matched.iloc[0]["account_byte_length"]
-            if val2 is not None:
-                return str(val2)
-        # 简要返回第一条记录的所有字段
-        row = matched.iloc[0].to_dict()
-        preview_items = []
-        max_len = 600
-        curr = 0
-        for k, v in row.items():
-            item = f"{k}: {v}"
-            if curr + len(item) + 1 > max_len:
-                preview_items.append("...后续字段已截断")
-                break
-            preview_items.append(item)
-            curr += len(item) + 1
-        return "查询结果：\n" + "\n".join(preview_items)
-    except Exception as e:
-        print(f"CSV query error: {e}")
-        return None
-
-
 # ---------------- Query orchestrator ----------------
 
 def process_query(query_text: str) -> str:
@@ -224,8 +151,7 @@ def process_query(query_text: str) -> str:
         if not q:
             return "请输入非空的查询关键字。"
 
-        # 1) Supabase (DB) first
-        if FEATURE_USE_SUPABASE and HAS_PG and DATABASE_URL:
+        if HAS_PG and DATABASE_URL:
             row_db = _query_db(q)
             if isinstance(row_db, dict) and row_db:
                 if "remarks" in row_db and row_db.get("remarks") not in (None, ""):
@@ -242,16 +168,13 @@ def process_query(query_text: str) -> str:
                     items.append(f"{k}: {v}")
                 return "查询结果：\n" + "\n".join(items) + " [supabase]"
 
-        # 2) CSV fallback
-        csv_msg = _query_csv(q)
-        if csv_msg:
-            return f"{csv_msg} [csv]"
-
-        # 3) Not found
+        # Not found or DB not configured
+        if not (HAS_PG and DATABASE_URL):
+            return "服务未配置数据库，请联系管理员。"
         return f"未找到记录：{query_text}"
     except Exception as e:
         print(f"Error processing query: {e}")
-        return "查询失败：请检查配置与数据源。"
+        return "查询失败：请检查数据库配置。"
 
 
 def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
@@ -275,7 +198,6 @@ class handler(BaseHTTPRequestHandler):
         # Build status values
         bot_cfg = bool(BOT_TOKEN)
         db_cfg = bool(DATABASE_URL)
-        csv_cfg = bool(CSV_FILE_PATH)
 
         # DB connectivity check (fast-fail)
         db_ok = False
@@ -291,13 +213,6 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             db_ok = False
             db_error = str(e)
-
-        # CSV availability
-        csv_ok = False
-        try:
-            csv_ok = _load_dataframe() is not None if csv_cfg and HAS_PANDAS else False
-        except Exception:
-            csv_ok = False
 
         # Telegram webhook info
         webhook_ok = False
@@ -328,10 +243,7 @@ class handler(BaseHTTPRequestHandler):
             "db_configured": db_cfg,
             "db_driver_available": HAS_PG,
             "db_ok": db_ok,
-            "db_error": db_error,
-            "csv_configured": csv_cfg,
-            "pandas_available": HAS_PANDAS,
-            "csv_ok": csv_ok
+            "db_error": db_error
         }
 
         accept = (self.headers.get("Accept") or "").lower()
@@ -353,8 +265,6 @@ code,pre{{background:#f6f8fa;padding:8px;border-radius:6px}}
   <li>Supabase(DB) 配置：{str(db_cfg)}，驱动：{str(HAS_PG)}，连接：{str(db_ok)}
     <span class="badge {'ok' if db_ok else ('warn' if db_cfg else 'err')}">{'OK' if db_ok else ('CFG' if db_cfg else 'MISSING')}</span>
     {(' 错误：' + db_error) if (db_cfg and not db_ok and db_error) else ''}</li>
-  <li>CSV 配置：{str(csv_cfg)}，pandas：{str(HAS_PANDAS)}，可读：{str(csv_ok)}
-    <span class="badge {'ok' if csv_ok else ('warn' if csv_cfg else 'err')}">{'OK' if csv_ok else ('CFG' if csv_cfg else 'MISSING')}</span></li>
 </ul>
 <h3>原始数据</h3>
 <pre>{json.dumps(status_json, ensure_ascii=False, indent=2)}</pre>
