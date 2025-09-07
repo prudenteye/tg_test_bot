@@ -1,0 +1,21 @@
+# Ignore local virtualenvs and caches
+tg_bot/
+venv/
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+
+# Ignore local test and dev scripts (only deploy serverless function)
+python/server.py
+python/test_*.py
+
+# Optional: ignore Node entry if you only deploy Python serverless
+server.js
+package.json
+node_modules/
+
+# Misc
+.DS_Store
