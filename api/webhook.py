@@ -14,6 +14,18 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else 
 CSV_FILE_PATH = os.environ.get("CSV_FILE_PATH") or "/var/task/db/wxid_test.csv"
 CSV_KEY_COLUMN = os.environ.get("CSV_KEY_COLUMN", "account")
 
+# Supabase/Postgres config
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL")
+FEATURE_USE_SUPABASE = (os.environ.get("FEATURE_USE_SUPABASE", "false").lower() == "true")
+SUPABASE_TABLE = os.environ.get("SUPABASE_TABLE_NAME", "accounts")
+SUPABASE_SEARCH_COLUMN = os.environ.get("SUPABASE_SEARCH_COLUMN", CSV_KEY_COLUMN)
+
+# Supabase/Postgres (via psycopg3) config
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL")
+FEATURE_USE_SUPABASE = (os.environ.get("FEATURE_USE_SUPABASE", "false").lower() == "true")
+SUPABASE_TABLE = os.environ.get("SUPABASE_TABLE_NAME", "accounts")
+SUPABASE_SEARCH_COLUMN = os.environ.get("SUPABASE_SEARCH_COLUMN", CSV_KEY_COLUMN)
+
 # Optional pandas import (for deployment, ensure pandas is installed)
 try:
     import pandas as pd  # type: ignore
@@ -21,6 +33,36 @@ try:
 except Exception:
     pd = None
     HAS_PANDAS = False
+
+# Optional Postgres driver (psycopg3) for Supabase
+try:
+    import psycopg  # type: ignore
+    from psycopg_pool import ConnectionPool  # type: ignore
+    from psycopg.rows import dict_row  # type: ignore
+    HAS_PG = True
+except Exception:
+    psycopg = None
+    ConnectionPool = None
+    dict_row = None
+    HAS_PG = False
+
+# Global DB pool (may persist across invocations)
+_PG_POOL = None  # type: ignore
+
+# Optional Postgres driver (psycopg3) for Supabase
+try:
+    import psycopg  # type: ignore
+    from psycopg_pool import ConnectionPool  # type: ignore
+    from psycopg.rows import dict_row  # type: ignore
+    HAS_PG = True
+except Exception:
+    psycopg = None
+    ConnectionPool = None
+    dict_row = None
+    HAS_PG = False
+
+# Global DB pool (may persist across invocations in serverless warm starts)
+_PG_POOL = None  # type: ignore
 
 # Simple in-memory cache; for serverless, may reload per invocation
 _DF_CACHE = None  # type: ignore
@@ -100,6 +142,98 @@ def _load_dataframe():
         print(f"Error loading CSV: {e}")
         return None
 
+def _is_safe_ident(name: str) -> bool:
+    # allow letters, numbers, underscore only
+    if not isinstance(name, str) or not name:
+        return False
+    for ch in name:
+        if not (ch.isalnum() or ch == "_"):
+            return False
+    return True
+
+def _ensure_db_url_ssl(url: str) -> str:
+    if not url:
+        return url
+    if "sslmode=" in url:
+        return url
+    return (url + ("&sslmode=require" if "?" in url else "?sslmode=require"))
+
+def _get_pool():
+    global _PG_POOL
+    if _PG_POOL is not None:
+        return _PG_POOL
+    if not HAS_PG or not DATABASE_URL:
+        return None
+    dsn = _ensure_db_url_ssl(DATABASE_URL)
+    try:
+        # Small pool is enough for serverless
+        _PG_POOL = ConnectionPool(dsn, min_size=0, max_size=5, kwargs={"connect_timeout": 5})
+        return _PG_POOL
+    except Exception as e:
+        print(f"Error creating DB pool: {e}")
+        return None
+
+def _query_db(q: str):
+    pool = _get_pool()
+    if not pool:
+        return None
+    table = SUPABASE_TABLE if _is_safe_ident(SUPABASE_TABLE) else "accounts"
+    col = SUPABASE_SEARCH_COLUMN if _is_safe_ident(SUPABASE_SEARCH_COLUMN) else "account"
+    sql = f'SELECT remarks, account_byte_length, account, account_hash FROM "{table}" WHERE "{col}" ILIKE %s LIMIT 1'
+    try:
+        with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, (f"%{q}%",))
+            row = cur.fetchone()
+            return row  # dict or None
+    except Exception as e:
+        print(f"DB query error: {e}")
+        return None
+
+def _is_safe_ident(name: str) -> bool:
+    if not isinstance(name, str) or not name:
+        return False
+    for ch in name:
+        if not (ch.isalnum() or ch == "_"):
+            return False
+    return True
+
+def _ensure_db_url_ssl(url: str) -> str:
+    if not url:
+        return url
+    if "sslmode=" in url:
+        return url
+    return url + ("&sslmode=require" if "?" in url else "?sslmode=require")
+
+def _get_pool():
+    global _PG_POOL
+    if _PG_POOL is not None:
+        return _PG_POOL
+    if not HAS_PG or not DATABASE_URL:
+        return None
+    dsn = _ensure_db_url_ssl(DATABASE_URL)
+    try:
+        _PG_POOL = ConnectionPool(dsn, min_size=0, max_size=5, kwargs={"connect_timeout": 5})
+        return _PG_POOL
+    except Exception as e:
+        print(f"Error creating DB pool: {e}")
+        return None
+
+def _query_db(q: str):
+    pool = _get_pool()
+    if not pool:
+        return None
+    table = SUPABASE_TABLE if _is_safe_ident(SUPABASE_TABLE) else "accounts"
+    col = SUPABASE_SEARCH_COLUMN if _is_safe_ident(SUPABASE_SEARCH_COLUMN) else "account"
+    sql = f'SELECT remarks, account_byte_length, account, account_hash FROM "{table}" WHERE "{col}" ILIKE %s LIMIT 1'
+    try:
+        with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, (f"%{q}%",))
+            row = cur.fetchone()
+            return row  # dict or None
+    except Exception as e:
+        print(f"DB query error: {e}")
+        return None
+
 def process_query(query_text: str) -> str:
     # Basic placeholder: guide for deployment configuration and usage
     if not HAS_PANDAS:
@@ -117,6 +251,29 @@ def process_query(query_text: str) -> str:
         q = (str(query_text) if query_text is not None else "").strip()
         if not q:
             return "请输入非空的查询关键字。"
+
+        # Prefer Supabase DB if enabled and driver available
+        if FEATURE_USE_SUPABASE and HAS_PG and DATABASE_URL:
+            row_db = _query_db(q)
+            if isinstance(row_db, dict) and row_db:
+                if "remarks" in row_db and row_db.get("remarks") not in (None, ""):
+                    return str(row_db["remarks"])
+                if "account_byte_length" in row_db and row_db.get("account_byte_length") is not None:
+                    return str(row_db["account_byte_length"])
+                # Fallback preview (limit items)
+                items = []
+                max_items = 20
+                for i, (k, v) in enumerate(row_db.items()):
+                    if i >= max_items:
+                        items.append("...后续字段已截断")
+                        break
+                    items.append(f"{k}: {v}")
+                return "查询结果：\
+" + "\
+".join(items)
+            # if no db result, fall back to CSV
+
+        # CSV fallback
         series = df[key_col].astype(str)
         matched = df[series.str.contains(q, regex=False, na=False)]
         if matched.empty:
@@ -167,7 +324,9 @@ class handler(BaseHTTPRequestHandler):
             "status": "ok",
             "bot_configured": bool(BOT_TOKEN),
             "csv_configured": bool(CSV_FILE_PATH),
-            "pandas_available": HAS_PANDAS
+            "pandas_available": HAS_PANDAS,
+            "db_configured": bool(DATABASE_URL),
+            "db_driver_available": HAS_PG
         })
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

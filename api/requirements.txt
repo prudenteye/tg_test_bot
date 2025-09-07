@@ -1,3 +1,5 @@
 # Minimal deps required by the serverless function
 requests==2.31.0
 pandas==2.2.2
+psycopg[binary]==3.1.18
+psycopg[binary]==3.1.18
