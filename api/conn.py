@@ -172,7 +172,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(b'{"error":"internal_error"}')
 
 # Vercel entry point (function form)
-def handler(request):
+def vercel_handler(request):
     try:
         # Return plain JSON string for maximal runtime compatibility
         return json.dumps(health_status(), ensure_ascii=False)

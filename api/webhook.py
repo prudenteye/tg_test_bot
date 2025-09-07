@@ -145,7 +145,7 @@ def handler_vercel(request):
         body = json.dumps(body, ensure_ascii=False)
     return body
 
-# Export default handler for Vercel runtime compatibility
-handler = handler_vercel
+# Named entrypoint (avoid shadowing class `handler`)
+vercel_handler = handler_vercel
 # Export default handler for Vercel runtime compatibility
 handler = handler_vercel
