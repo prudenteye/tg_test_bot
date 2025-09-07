@@ -27,7 +27,7 @@
 <body>
   <div class="wrap">
     <h1>服务状态</h1>
-    <p>仅展示端点可用性。</p>
+    <p>仅展示状态：Webhook 端点可用性、数据连接。</p>
 
     <div>
       <button id="checkBtn" class="btn">检查状态</button>
@@ -48,13 +48,28 @@
       elBtn.disabled = true;
       elBtn.textContent = '检查中...';
       try {
-        const res = await fetch('/api/conn', { headers: { 'Accept': 'application/json' } });
-        const data = await res.json();
-        const endpointOk = res.ok && data && data.status === 'ok';
+        // 1) 数据连接状态（从 /api/conn 获取 db_ok）
+        const connRes = await fetch('/api/conn', { headers: { 'Accept': 'application/json' } });
+        const connData = await connRes.json();
+        const dbOk = !!(connRes.ok && connData && connData.status === 'ok' && connData.db_ok === true);
+
+        // 2) Webhook 端点可用性（POST 最小负担请求，仅看 HTTP 可用性）
+        let webhookOk = false;
+        try {
+          const wres = await fetch('/api/webhook', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ "update_id": 1, "message": {} })
+          });
+          webhookOk = wres.ok;
+        } catch (e) {
+          webhookOk = false;
+        }
 
         elStatus.style.display = 'block';
         elStatus.innerHTML = `
-          <div class="row"><span class="k">端点</span><span class="v">${String(endpointOk)} ${badge(endpointOk)}</span></div>
+          <div class="row"><span class="k">Webhook</span><span class="v">${String(webhookOk)} ${badge(webhookOk)}</span></div>
+          <div class="row"><span class="k">数据连接</span><span class="v">${String(dbOk)} ${badge(dbOk)}</span></div>
         `;
       } catch (e) {
         elStatus.style.display = 'block';
