@@ -25,7 +25,7 @@
 
 ## 运行逻辑（精简）
 
-- GET /api/webhook：健康检查（最小披露，逻辑由资源层 api/conn.py 提供）
+- GET /api/conn：健康检查
   - 响应 JSON：{"status":"ok","db_ok":true|false,"commit":{"sha":"xxxxxxx"}?}
 - POST /api/webhook：处理 Telegram Webhook 更新
   - 仅处理文本消息（超过 50 字节会提示过长）
