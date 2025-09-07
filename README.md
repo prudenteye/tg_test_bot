@@ -82,7 +82,9 @@
 ## 常见问题
 
 - 访问 /api/conn.py 报错：应访问 /api/conn（不要带 .py）
-- 部署失败（忽略构建/运行时版本）：将 vercel.json 保持最小化配置；确保根目录 requirements.txt 存在
+- 部署失败/构建被忽略：
+  - vercel.json 保持最小化（仅 {"version": 2}）；不要配置 ignoreCommand（否则出现 “Ignored Build Step” 导致不触发构建）
+  - 仅使用根目录 requirements.txt 安装依赖；不要创建 api/requirements.txt（避免与根依赖冲突）
 - Vercel 报 issubclass 错误：不要用函数覆盖模块内 class handler 符号
 
 ## 变更摘要
