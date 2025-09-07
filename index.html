@@ -72,7 +72,9 @@
         elRaw.style.display = 'block';
         elRawJson.textContent = JSON.stringify(data, null, 2);
 
+        const commit = data.commit || {};
         const html = `
+          ${commit.sha ? `<div class="row"><span class="k">代码版本</span><span class="v">${commit.sha}${commit.branch ? ' @ ' + commit.branch : ''}${commit.env ? ' · ' + commit.env : ''}</span></div>` : ''}
           <div class="row"><span class="k">Bot 配置</span><span class="v">${String(data.bot_configured)} ${badge(!!data.bot_configured)}</span></div>
           <div class="row"><span class="k">Webhook</span><span class="v">${String(data.webhook_ok)} ${badge(!!data.webhook_ok, true)}</span></div>
           ${data.webhook_url ? `<div class="row"><span class="k">Webhook URL</span><span class="v">${data.webhook_url}</span></div>` : ''}

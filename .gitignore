@@ -4,6 +4,9 @@
 # Python
 __pycache__/
 *.pyc
+# Do not commit local dev folders
+scripts/
+db/
 *.pyo
 *.pyd
 *.log
@@ -18,6 +21,10 @@ venv/
 .env_local/
 .venv/
 tg_bot/
+
+# test
+scripts/
+db/
 
 # Node
 node_modules/

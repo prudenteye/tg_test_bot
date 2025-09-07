@@ -1,0 +1,5 @@
+# Local development dependencies (install in your virtual environment)
+flask==3.0.3
+python-dotenv==1.0.1
+requests==2.31.0
+psycopg[binary]==3.1.18

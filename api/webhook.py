@@ -234,6 +234,8 @@ class handler(BaseHTTPRequestHandler):
             webhook_ok = False
             webhook_err = str(e)
 
+        # Commit metadata (Vercel CI/CD)
+        commit_sha = (os.environ.get("VERCEL_GIT_COMMIT_SHA") or os.environ.get("GIT_COMMIT_SHA") or "")[:7]
         status_json = {
             "status": "ok",
             "bot_configured": bot_cfg,
@@ -243,7 +245,15 @@ class handler(BaseHTTPRequestHandler):
             "db_configured": db_cfg,
             "db_driver_available": HAS_PG,
             "db_ok": db_ok,
-            "db_error": db_error
+            "db_error": db_error,
+            "commit": {
+                "sha": commit_sha,
+                "message": os.environ.get("VERCEL_GIT_COMMIT_MESSAGE") or "",
+                "branch": os.environ.get("VERCEL_GIT_COMMIT_REF") or "",
+                "repo_owner": os.environ.get("VERCEL_GIT_REPO_OWNER") or "",
+                "repo_slug": os.environ.get("VERCEL_GIT_REPO_SLUG") or "",
+                "env": os.environ.get("VERCEL_ENV") or ""
+            }
         }
 
         accept = (self.headers.get("Accept") or "").lower()
@@ -257,7 +267,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Ari
 code,pre{{background:#f6f8fa;padding:8px;border-radius:6px}}
 </style>
 </head><body>
-<h1>服务状态</h1>
+<h1>服务状态{(' · ' + commit_sha) if (locals().get('commit_sha')) else ''}</h1>
 <ul>
   <li>Telegram Bot 配置：{str(bot_cfg)} <span class="badge {'ok' if bot_cfg else 'err'}">{'OK' if bot_cfg else 'MISSING'}</span></li>
   <li>Webhook：{str(webhook_ok)} <span class="badge {'ok' if webhook_ok else 'warn'}">{'OK' if webhook_ok else 'CHECK'}</span>

@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "functions": {
+    "api/*.py": {
+      "runtime": "python3.11"
+    }
+  },
+  "builds": [
+    { "src": "api/*.py", "use": "@vercel/python" }
+  ],
+  "routes": [
+    { "src": "/api/webhook", "dest": "/api/webhook.py" }
+  ],
+  "ignoreCommand": "echo Ignoring dev folders && echo",
+  "git": {
+    "ignore": [
+      "db/**",
+      "scripts/**"
+    ]
+  }
+}
