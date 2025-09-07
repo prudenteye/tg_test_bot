@@ -174,14 +174,7 @@ class handler(BaseHTTPRequestHandler):
 # Vercel entry point (function form)
 def handler(request):
     try:
-        return {
-            "statusCode": 200,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps(health_status(), ensure_ascii=False),
-        }
+        # Return plain JSON string for maximal runtime compatibility
+        return json.dumps(health_status(), ensure_ascii=False)
     except Exception:
-        return {
-            "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
-            "body": '{"error":"internal_error"}',
-        }
+        return '{"error":"internal_error"}'

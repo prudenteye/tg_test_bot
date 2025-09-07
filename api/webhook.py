@@ -138,6 +138,14 @@ class handler(BaseHTTPRequestHandler):
 
 # Vercel entry point
 def handler_vercel(request):
-    return _handle(request)
+    # Return string body for maximal runtime compatibility
+    result = _handle(request)
+    body = result.get("body", "{}")
+    if isinstance(body, (dict, list)):
+        body = json.dumps(body, ensure_ascii=False)
+    return body
+
+# Export default handler for Vercel runtime compatibility
+handler = handler_vercel
 # Export default handler for Vercel runtime compatibility
 handler = handler_vercel
