@@ -54,6 +54,29 @@ def get_pool():
     except Exception:
         return None
 
+def short_commit_sha() -> str:
+    return (os.environ.get("VERCEL_GIT_COMMIT_SHA") or os.environ.get("GIT_COMMIT_SHA") or "")[:7]
+
+
+def health_status() -> Dict[str, Any]:
+    """
+    Minimal health status for GET /api/webhook.
+    Returns:
+      {
+        "status": "ok",
+        "db_ok": true|false,
+        "commit": {"sha": "xxxxxxx"}?   # present only when available
+      }
+    """
+    sha = short_commit_sha()
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "db_ok": bool(ping_db()),
+    }
+    if sha:
+        payload["commit"] = {"sha": sha}
+    return payload
+
 
 def ping_db() -> bool:
     pool = get_pool()

@@ -31,8 +31,7 @@ def _parse_body(request) -> Dict[str, Any]:
         return {}
 
 
-def _short_commit_sha() -> str:
-    return (os.environ.get("VERCEL_GIT_COMMIT_SHA") or os.environ.get("GIT_COMMIT_SHA") or "")[:7]
+
 
 
 def _handle(request) -> Dict[str, Any]:
@@ -108,11 +107,7 @@ def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         # Minimal status: endpoint alive + DB connectivity, plus short commit
-        status_json = {
-            "status": "ok",
-            "db_ok": bool(conn.ping_db()),
-            "commit": {"sha": _short_commit_sha()} if _short_commit_sha() else {}
-        }
+        status_json = conn.health_status()
         body = json.dumps(status_json, ensure_ascii=False)
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

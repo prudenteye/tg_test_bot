@@ -1,6 +1,6 @@
 # Telegram Bot Supabase 查询（Vercel Python Serverless）
 
-本项目基于 Vercel Python Serverless 的 Telegram Bot。机器人接收用户文本，在 Supabase/Postgres 数据库执行模糊匹配（ILIKE %q%）并返回结果摘要。已移除本地 CSV 能力，仅保留数据库查询。
+本项目基于 Vercel Python Serverless 的 Telegram Bot。机器人接收用户文本，在 Supabase/Postgres 数据库执行模糊匹配（ILIKE %q%）并返回结果摘要。
 
 - 输入长度限制：不超过 50 字节（UTF-8）
 - 查询表：默认 accounts（可通过 SUPABASE_TABLE_NAME 覆盖）
@@ -25,7 +25,7 @@
 
 ## 运行逻辑（精简）
 
-- GET /api/webhook：健康检查（最小披露）
+- GET /api/webhook：健康检查（最小披露，逻辑由资源层 api/conn.py 提供）
   - 响应 JSON：{"status":"ok","db_ok":true|false,"commit":{"sha":"xxxxxxx"}?}
 - POST /api/webhook：处理 Telegram Webhook 更新
   - 仅处理文本消息（超过 50 字节会提示过长）
