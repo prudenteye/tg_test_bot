@@ -10,6 +10,21 @@ from typing import Dict, Any, Union
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 
+# Main feature config placeholders
+CSV_FILE_PATH = os.environ.get("CSV_FILE_PATH") or "/var/task/db/wxid_test.csv"
+CSV_KEY_COLUMN = os.environ.get("CSV_KEY_COLUMN", "account")
+
+# Optional pandas import (for deployment, ensure pandas is installed)
+try:
+    import pandas as pd  # type: ignore
+    HAS_PANDAS = True
+except Exception:
+    pd = None
+    HAS_PANDAS = False
+
+# Simple in-memory cache; for serverless, may reload per invocation
+_DF_CACHE = None  # type: ignore
+
 def _handle(request) -> Dict[str, Any]:
     # Method guard
     if hasattr(request, "method") and request.method != "POST":
@@ -54,20 +69,81 @@ def _handle(request) -> Dict[str, Any]:
             send_message(chat_id, "请发送文本消息！")
             return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
 
-        # 32-byte limit (UTF-8)
-        if len(text.encode("utf-8")) > 32:
-            send_message(chat_id, "消息太长了！请发送不超过32字节的字符串。")
+        # 50-byte limit (UTF-8)
+        if len(text.encode("utf-8")) > 50:
+            send_message(chat_id, "消息太长了！请发送不超过50字节的字符串。")
             return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
 
-        # Reverse and reply
-        reversed_text = text[::-1]
-        send_message(chat_id, f"逆序结果：{reversed_text}")
+        # CSV query
+        result_msg = process_query(text)
+        send_message(chat_id, result_msg)
 
         return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
 
     except Exception as e:
         print(f"Error processing webhook: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": "Internal server error"})}
+
+def _load_dataframe():
+    global _DF_CACHE
+    if _DF_CACHE is not None:
+        return _DF_CACHE
+    if not HAS_PANDAS:
+        return None
+    if not CSV_FILE_PATH:
+        return None
+    try:
+        df = pd.read_csv(CSV_FILE_PATH, encoding="utf-8-sig")
+        _DF_CACHE = df
+        return df
+    except Exception as e:
+        print(f"Error loading CSV: {e}")
+        return None
+
+def process_query(query_text: str) -> str:
+    # Basic placeholder: guide for deployment configuration and usage
+    if not HAS_PANDAS:
+        return "功能占位：未检测到 pandas。请在部署环境安装 pandas，并配置 CSV_FILE_PATH/CSV_KEY_COLUMN。"
+    if not CSV_FILE_PATH:
+        return "功能占位：未配置 CSV_FILE_PATH 环境变量。请设置 CSV 文件路径后重试。"
+    df = _load_dataframe()
+    if df is None:
+        return "功能占位：无法加载 CSV 文件，请检查路径和文件格式。"
+    key_col = CSV_KEY_COLUMN if CSV_KEY_COLUMN in df.columns else None
+    if key_col is None:
+        return f"功能占位：CSV 中不存在配置的键列 '{CSV_KEY_COLUMN}'，当前列为：{list(df.columns)}"
+    try:
+        # 模糊匹配（包含），对空白输入与非字符串数据做兼容
+        q = (str(query_text) if query_text is not None else "").strip()
+        if not q:
+            return "请输入非空的查询关键字。"
+        series = df[key_col].astype(str)
+        matched = df[series.str.contains(q, regex=False, na=False)]
+        if matched.empty:
+            return f"未找到记录：{query_text}"
+        # 优先返回 remarks 或 account_byte_length
+        if "remarks" in matched.columns:
+            val = matched.iloc[0]["remarks"]
+            return str(val) if val is not None else "未找到 remarks 内容"
+        if "account_byte_length" in matched.columns:
+            return str(matched.iloc[0]["account_byte_length"])
+        # 简要返回第一条记录的所有字段
+        row = matched.iloc[0].to_dict()
+        # 控制返回长度，避免过长消息
+        preview_items = []
+        max_len = 600
+        curr = 0
+        for k, v in row.items():
+            item = f"{k}: {v}"
+            if curr + len(item) + 1 > max_len:
+                preview_items.append("...后续字段已截断")
+                break
+            preview_items.append(item)
+            curr += len(item) + 1
+        return "查询结果：\n" + "\n".join(preview_items)
+    except Exception as e:
+        print(f"Error processing query: {e}")
+        return "查询失败：请检查 CSV 内容与配置。"
 
 def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
     if not TELEGRAM_API_URL or not chat_id:
@@ -87,7 +163,12 @@ def send_message(chat_id: Union[int, str], text: str) -> Dict[str, Any]:
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         # Health check
-        body = json.dumps({"status": "ok", "bot_configured": bool(BOT_TOKEN)})
+        body = json.dumps({
+            "status": "ok",
+            "bot_configured": bool(BOT_TOKEN),
+            "csv_configured": bool(CSV_FILE_PATH),
+            "pandas_available": HAS_PANDAS
+        })
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
