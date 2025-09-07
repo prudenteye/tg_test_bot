@@ -8,16 +8,19 @@ import json
 from http.server import BaseHTTPRequestHandler
 from typing import Optional, Dict, Any
 
-# Optional Postgres driver (psycopg3)
+# Optional Postgres driver (psycopg3) and pool
 try:
     import psycopg  # type: ignore
-    from psycopg_pool import ConnectionPool  # type: ignore
     from psycopg.rows import dict_row  # type: ignore
+    try:
+        from psycopg_pool import ConnectionPool  # type: ignore
+    except Exception:  # pool optional
+        ConnectionPool = None  # type: ignore
     _has_pg = True
 except Exception:
     psycopg = None  # type: ignore
-    ConnectionPool = None  # type: ignore
     dict_row = None  # type: ignore
+    ConnectionPool = None  # type: ignore
     _has_pg = False
 
 # Config
@@ -47,11 +50,11 @@ def get_pool():
     global _pool
     if _pool is not None:
         return _pool
-    if not _has_pg or not DATABASE_URL:
+    if not _has_pg or not DATABASE_URL or ConnectionPool is None:
         return None
     dsn = _ensure_db_url_ssl(DATABASE_URL)
     try:
-        _pool = ConnectionPool(dsn, min_size=0, max_size=5, kwargs={"connect_timeout": 2})
+        _pool = ConnectionPool(dsn, min_size=0, max_size=5, kwargs={"connect_timeout": 5})
         return _pool
     except Exception:
         return None
@@ -61,28 +64,48 @@ def short_commit_sha() -> str:
     return (os.environ.get("VERCEL_GIT_COMMIT_SHA") or os.environ.get("GIT_COMMIT_SHA") or "")[:7]
 
 
+def _direct_connect():
+    if not _has_pg or not DATABASE_URL:
+        return None
+    try:
+        return psycopg.connect(_ensure_db_url_ssl(DATABASE_URL), connect_timeout=5)  # type: ignore
+    except Exception:
+        return None
+
+
 def ping_db() -> bool:
+    # Prefer pool; fallback to direct connection
     pool = get_pool()
-    if not pool:
+    if pool is not None:
+        try:
+            with pool.connection() as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+                return True
+        except Exception:
+            return False
+    # direct fallback
+    conn = _direct_connect()
+    if conn is None:
         return False
     try:
-        with pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT 1")
-            cur.fetchone()
-            return True
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+                return True
     except Exception:
         return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def health_status() -> Dict[str, Any]:
     """
     Minimal health status for GET /api/conn.
-    Returns:
-      {
-        "status": "ok",
-        "db_ok": true|false,
-        "commit": {"sha": "xxxxxxx"}?   # present only when available
-      }
     """
     sha = short_commit_sha()
     payload: Dict[str, Any] = {
@@ -99,18 +122,38 @@ def query_first(q: str) -> Optional[Dict[str, Any]]:
     Query first matched row by ILIKE on configured column.
     Returns a dict row or None. Avoids exposing table/column outside.
     """
-    pool = get_pool()
-    if not pool:
+    q = (q or "").strip()
+    if not q:
         return None
     table = SUPABASE_TABLE if _is_safe_ident(SUPABASE_TABLE) else "accounts"
     col = SUPABASE_SEARCH_COLUMN if _is_safe_ident(SUPABASE_SEARCH_COLUMN) else "account"
     sql = f'SELECT remarks, account_byte_length, account, account_hash FROM "{table}" WHERE "{col}" ILIKE %s LIMIT 1'
+
+    pool = get_pool()
+    if pool is not None:
+        try:
+            with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:  # type: ignore
+                cur.execute(sql, (f"%{q}%",))
+                return cur.fetchone()
+        except Exception:
+            return None
+
+    # direct fallback
+    conn = _direct_connect()
+    if conn is None:
+        return None
     try:
-        with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(sql, (f"%{q}%",))
-            return cur.fetchone()
+        with conn:
+            with conn.cursor(row_factory=dict_row) as cur:  # type: ignore
+                cur.execute(sql, (f"%{q}%",))
+                return cur.fetchone()
     except Exception:
         return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 # HTTP handler to expose GET /api/conn as health endpoint
