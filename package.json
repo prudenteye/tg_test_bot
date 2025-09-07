@@ -1,0 +1,20 @@
+{
+  "name": "telegram-deployer-bot-backend",
+  "version": "1.0.0",
+  "description": "Telegram bot webhook backend to receive code files, deploy, and return URL",
+  "main": "server.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "extract-zip": "^2.0.1",
+    "nanoid": "^4.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

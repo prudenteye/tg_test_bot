@@ -1,0 +1,2 @@
+# Minimal deps required by the serverless function
+requests==2.31.0

@@ -1,0 +1,32 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Virtualenvs
+venv/
+.env_local/
+.venv/
+tg_bot/
+
+# Node
+node_modules/
+
+# Vercel/Build
+.vercel/
+.next/
+out/
+
+# Misc
+*.swp
+*.swo
