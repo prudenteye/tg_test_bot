@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>Telegram Bot - Supabase 状态</title>
+  <title>服务状态</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     :root { --ok:#2e7d32; --warn:#ed6c02; --err:#c62828; --bg:#0b0f14; --fg:#e6edf3; --muted:#8b949e; --card:#0d1117; }
@@ -18,7 +18,6 @@
     .v{color:#e6edf3;font-weight:600}
     .badge{display:inline-block;padding:2px 8px;border-radius:10px;color:#fff;font-size:12px;margin-left:8px}
     .ok{background:var(--ok)} .warn{background:var(--warn)} .err{background:var(--err)}
-    code,pre{background:#0b1110;border:1px solid #30363d;border-radius:8px;padding:8px;display:block;overflow:auto}
     .btn{cursor:pointer;background:#238636;border:1px solid #2ea043;color:#fff;border-radius:8px;padding:10px 14px;font-weight:600}
     .btn:disabled{opacity:.6;cursor:not-allowed}
     a{color:#58a6ff;text-decoration:none}
@@ -27,39 +26,22 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Telegram Bot - Supabase 状态</h1>
-    <p>此页面会调用 <code>/api/webhook</code> 获取健康信息并展示结果。你也可以直接打开 <a href="/api/webhook" target="_blank" rel="noopener">服务状态页</a> 查看原始详情。</p>
+    <h1>服务状态</h1>
+    <p>仅展示端点可用性与数据库连通性。</p>
 
     <div>
       <button id="checkBtn" class="btn">检查状态</button>
     </div>
 
     <div id="status" class="card" style="display:none"></div>
-
-    <div class="card">
-      <div class="row"><span class="k">Webhook 端点</span><span class="v"><a href="/api/webhook" target="_blank" rel="noopener">/api/webhook</a></span></div>
-      <div class="row"><span class="k">POST 示例</span><span class="v">发送 Telegram 更新 JSON（仅文本消息）</span></div>
-      <pre>{
-  "update_id":1,
-  "message":{"message_id":1,"chat":{"id":123,"type":"private"},"date":0,"text":"some-account"}
-}</pre>
-    </div>
-
-    <div id="raw" class="card" style="display:none">
-      <div class="row"><span class="k">原始 JSON</span><span class="v">调试用</span></div>
-      <pre id="rawJson"></pre>
-    </div>
   </div>
 
   <script>
     const elBtn = document.getElementById('checkBtn');
     const elStatus = document.getElementById('status');
-    const elRaw = document.getElementById('raw');
-    const elRawJson = document.getElementById('rawJson');
 
-    function badge(ok, cfg=false) {
-      if (ok) return '<span class="badge ok">OK</span>';
-      return cfg ? '<span class="badge warn">CFG</span>' : '<span class="badge err">MISSING</span>';
+    function badge(ok) {
+      return ok ? '<span class="badge ok">OK</span>' : '<span class="badge err">ERR</span>';
     }
 
     async function check() {
@@ -68,26 +50,19 @@
       try {
         const res = await fetch('/api/webhook', { headers: { 'Accept': 'application/json' } });
         const data = await res.json();
-        elStatus.style.display = 'block';
-        elRaw.style.display = 'block';
-        elRawJson.textContent = JSON.stringify(data, null, 2);
+        const endpointOk = res.ok && data && data.status === 'ok';
+        const dbOk = !!(data && data.db_ok);
+        const sha = data && data.commit && data.commit.sha ? data.commit.sha : '';
 
-        const commit = data.commit || {};
-        const html = `
-          ${commit.sha ? `<div class="row"><span class="k">代码版本</span><span class="v">${commit.sha}${commit.branch ? ' @ ' + commit.branch : ''}${commit.env ? ' · ' + commit.env : ''}</span></div>` : ''}
-          <div class="row"><span class="k">Bot 配置</span><span class="v">${String(data.bot_configured)} ${badge(!!data.bot_configured)}</span></div>
-          <div class="row"><span class="k">Webhook</span><span class="v">${String(data.webhook_ok)} ${badge(!!data.webhook_ok, true)}</span></div>
-          ${data.webhook_url ? `<div class="row"><span class="k">Webhook URL</span><span class="v">${data.webhook_url}</span></div>` : ''}
-          ${data.webhook_error ? `<div class="row"><span class="k">Webhook 错误</span><span class="v">${data.webhook_error}</span></div>` : ''}
-          <div class="row"><span class="k">DB 配置</span><span class="v">${String(data.db_configured)} ${badge(!!data.db_configured)}</span></div>
-          <div class="row"><span class="k">DB 驱动可用</span><span class="v">${String(data.db_driver_available)} ${badge(!!data.db_driver_available, true)}</span></div>
-          <div class="row"><span class="k">DB 连通性</span><span class="v">${String(data.db_ok)} ${badge(!!data.db_ok, !!data.db_configured)}</span></div>
-          ${data.db_error ? `<div class="row"><span class="k">DB 错误</span><span class="v">${data.db_error}</span></div>` : ''}
+        elStatus.style.display = 'block';
+        elStatus.innerHTML = `
+          <div class="row"><span class="k">端点</span><span class="v">${String(endpointOk)} ${badge(endpointOk)}</span></div>
+          <div class="row"><span class="k">数据库</span><span class="v">${String(dbOk)} ${badge(dbOk)}</span></div>
+          ${sha ? `<div class="row"><span class="k">版本</span><span class="v">${sha}</span></div>` : ''}
         `;
-        elStatus.innerHTML = html;
       } catch (e) {
         elStatus.style.display = 'block';
-        elStatus.innerHTML = `<div class="row"><span class="k">错误</span><span class="v">${(e && e.message) || '请求失败'} ${'<span class="badge err">ERR</span>'}</span></div>`;
+        elStatus.innerHTML = `<div class="row"><span class="k">端点</span><span class="v">false ${badge(false)}</span></div>`;
       } finally {
         elBtn.disabled = false;
         elBtn.textContent = '检查状态';
@@ -95,7 +70,6 @@
     }
 
     elBtn.addEventListener('click', check);
-    // 首屏自动检查
     check();
   </script>
 </body>
