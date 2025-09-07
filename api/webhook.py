@@ -1,14 +1,11 @@
 # Vercel Python Serverless function - webhook handler (business layer, minimal I/O)
 import json
 import os
-import sys
 import requests
 from http.server import BaseHTTPRequestHandler
 from typing import Dict, Any, Union
 
-# ensure sibling import works on Vercel where api/ may not be a package
-sys.path.append(os.path.dirname(__file__))
-import conn  # resource layer
+from api import conn  # resource layer
 
 # Telegram
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
