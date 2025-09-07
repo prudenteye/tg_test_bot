@@ -5,9 +5,7 @@
       "runtime": "python3.11"
     }
   },
-  "builds": [
-    { "src": "api/*.py", "use": "@vercel/python" }
-  ],
+
   "routes": [
     { "src": "/api/webhook", "dest": "/api/webhook.py" },
     { "src": "/api/conn", "dest": "/api/conn.py" },
