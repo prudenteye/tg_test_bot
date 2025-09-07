@@ -25,6 +25,8 @@ tg_bot/
 # test
 scripts/
 db/
+docs/
+requirements-dev.txt
 
 # Node
 node_modules/
